@@ -105,13 +105,38 @@ function onAttendance(path,date,cb){
   return ()=>{if(stop)stop();};
 }
 
+function normalizePiketEmail(username){
+  return String(username||'').trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9._-]/g,'')+'@piket.smkwd.local';
+}
+
+function hariIndonesia(){
+  return new Intl.DateTimeFormat('id-ID',{timeZone:TZ,weekday:'long'}).format(new Date());
+}
+
+async function hasPiketScheduleToday(pr){
+  const rows=await values('apps/piket/jadwal');
+  const uid=String(pr.userID||pr.UserID||'').trim();
+  const hari=hariIndonesia().toLowerCase();
+  return rows.some(x=>{
+    if(String(x.Status||x.status||'Aktif').toLowerCase()!=='aktif') return false;
+    if(String(x.UserID||x.userID||'').trim()!==uid) return false;
+    const rowHari=String(x.Hari||x.hari||'').trim().toLowerCase();
+    if(rowHari) return rowHari===hari;
+    const rowTanggal=String(x.Tanggal||x.tanggal||'').slice(0,10);
+    return rowTanggal===today();
+  });
+}
+
 async function login(username,password){
   const fb=await fbReady;
   const u=String(username||'').trim();
   const p=String(password||'');
   if(!u||!p)return {ok:false,message:'Username dan password wajib diisi.'};
+
+  // Petugas Piket hasil provisioning memakai satu email deterministik.
+  // Akun Guru/Admin yang sudah ada tetap dicoba melalui mekanisme lama.
   const emailCandidates=u.includes('@')?[u]:[
-    u.toLowerCase().replace(/\s+/g,'_')+'@piket.smkwd.local',
+    normalizePiketEmail(u),
     u.toLowerCase().replace(/\s+/g,'_')+'@petugas.smkwd.local',
     u.toLowerCase().replace(/\s+/g,'_')+'@guru.smkwd.local',
     u.toLowerCase().replace(/\s+/g,'_')+'@admin.smkwd.local'
@@ -121,7 +146,15 @@ async function login(username,password){
     try{
       const c=await fb.signInWithEmailAndPassword(fb.auth,email,p);
       const pr=await profile();
-      return {ok:true,token:c.user.uid,user:{Username:pr.identifier||u,NamaPetugas:pr.nama||u,Role:pr.role||'',Aktif:pr.active===true,uid:c.user.uid}};
+      const role=String(pr.role||'').toLowerCase();
+      if(role==='petugas'){
+        const allowed=await hasPiketScheduleToday(pr);
+        if(!allowed){
+          await fb.signOut(fb.auth);
+          return {ok:false,message:'Anda tidak memiliki jadwal piket hari ini.'};
+        }
+      }
+      return {ok:true,token:c.user.uid,user:{Username:pr.username||pr.identifier||u,NamaPetugas:pr.nama||u,Role:pr.role||'',Aktif:pr.active===true,uid:c.user.uid,UserID:pr.userID||pr.UserID||''}};
     }catch(e){last=e;try{await fb.signOut(fb.auth);}catch(_){} }
   }
   return {ok:false,message:last?.code==='auth/invalid-credential'?'Username atau password salah.':(last?.message||'Login gagal.')};
