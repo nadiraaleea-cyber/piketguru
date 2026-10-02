@@ -1,0 +1,23 @@
+{
+  "description": "Minimum merge additions required by the final Piket Direct Firebase build. Merge into the existing proven rules; do not replace the whole ruleset.",
+  "user_role_validation_addition": {
+    "location": "schools/$schoolId/security/users/$uid/.validate",
+    "change": "Allow role === 'petugas' in the existing role whitelist. Preserve uid, active and other existing validation rules."
+  },
+  "absensi_siswa_attendance_write_addition": {
+    "location": "schools/$schoolId/apps/absensi_siswa/attendance/$record/.write",
+    "change": "Keep the existing admin/guru condition and add the existing active-user + role === 'petugas' condition with OR. Do not remove the current siswa restriction/read rule."
+  },
+  "absensi_guru_attendance_write_addition": {
+    "location": "schools/$schoolId/apps/absensi_guru/attendance/$key/.write",
+    "change": "Keep the existing admin/guru condition and add the existing active-user + role === 'petugas' condition with OR. Do not remove the current read/validation rules."
+  },
+  "performance_indexes": {
+    "apps/piket/jadwal": ["tanggal"],
+    "apps/piket/kejadian": ["tanggal"],
+    "apps/piket/siswaTerlambat": ["tanggal"],
+    "apps/piket/tugas": ["tanggal"],
+    "apps/piket/absensiPetugas": ["Tanggal"]
+  },
+  "important": "This is a merge guide, not a complete deployable Firebase rules file. Existing working rules must remain intact."
+}
