@@ -42,7 +42,7 @@ const ready=(async()=>{
 fbReady=ready;
 
 const rootPath=p=>'schools/'+SCHOOL+'/'+String(p||'').replace(/^\/+/, '');
-const r=(fb,p)=>fb.ref(rootPath(p));
+const r=(fb,p)=>fb.ref(fb.db,rootPath(p));
 const key=v=>String(v??'').trim().replace(/[.#$\/\[\]]/g,'_')||'_';
 const pad=n=>String(n).padStart(2,'0');
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
