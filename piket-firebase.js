@@ -21,56 +21,28 @@ const SESSION='guruPiketFirebaseSession';
 
 let fbReady;
 const ready=(async()=>{
-  // Gunakan Firebase Compat secara konsisten agar tidak terjadi pencampuran
-  // object Database modular/compat yang memicu _checkNotDeleted.
-  if(!window.firebase) throw new Error('Firebase SDK belum dimuat.');
-  const firebase=window.firebase;
-  const app=firebase.apps.length?firebase.app():firebase.initializeApp(CFG);
-  const db=app.database();
-  const auth=app.auth();
-  try{await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);}catch(_){ }
+  const [appMod,dbMod,authMod]=await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${SDK}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${SDK}/firebase-database.js`),
+    import(`https://www.gstatic.com/firebasejs/${SDK}/firebase-auth.js`)
+  ]);
+  const {initializeApp,getApps,getApp}=appMod;
+  const {getDatabase,ref,get,set,update,remove,push,query,orderByKey,startAt,endAt,orderByChild,equalTo,onValue,get:getValue,runTransaction}=dbMod;
+  const {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signOut,setPersistence,browserLocalPersistence}=authMod;
+  const app=getApps().length?getApp():initializeApp(CFG);
+  const db=getDatabase(app);
+  const auth=getAuth(app);
+  await setPersistence(auth,browserLocalPersistence);
   const authReady=new Promise(resolve=>{
     if(auth.currentUser) return resolve(auth.currentUser);
-    const off=auth.onAuthStateChanged(u=>{off();resolve(u);});
+    const off=onAuthStateChanged(auth,u=>{off();resolve(u);});
   });
-  const makeQuery=(ref,...constraints)=>{
-    let q=ref;
-    for(const c of constraints){
-      if(!c)continue;
-      if(c.t==='orderByChild')q=q.orderByChild(c.v);
-      else if(c.t==='orderByKey')q=q.orderByKey();
-      else if(c.t==='startAt')q=q.startAt(c.v);
-      else if(c.t==='endAt')q=q.endAt(c.v);
-      else if(c.t==='equalTo')q=q.equalTo(c.v);
-    }
-    return q;
-  };
-  return {
-    app,db,auth,
-    ref:(database,path)=>database.ref(path),
-    getValue:q=>q.get(),
-    get:q=>q.get(),
-    set:(ref,data)=>ref.set(data),
-    update:(ref,data)=>ref.update(data),
-    remove:ref=>ref.remove(),
-    push:ref=>ref.push(),
-    query:makeQuery,
-    orderByKey:()=>({t:'orderByKey'}),
-    startAt:v=>({t:'startAt',v}),
-    endAt:v=>({t:'endAt',v}),
-    orderByChild:v=>({t:'orderByChild',v}),
-    equalTo:v=>({t:'equalTo',v}),
-    onValue:(q,cb,err)=>q.on('value',cb,err),
-    signInWithEmailAndPassword:(a,e,p)=>a.signInWithEmailAndPassword(e,p),
-    signOut:a=>a.signOut(),
-    onAuthStateChanged:(a,cb)=>a.onAuthStateChanged(cb),
-    authReady
-  };
+  return {app,db,auth,ref,get,set,update,remove,push,query,orderByKey,startAt,endAt,orderByChild,equalTo,onValue,getValue,runTransaction,onAuthStateChanged,signInWithEmailAndPassword,signOut,authReady};
 })();
 fbReady=ready;
 
 const rootPath=p=>'schools/'+SCHOOL+'/'+String(p||'').replace(/^\/+/, '');
-const r=(fb,p)=>fb.ref(fb.db,rootPath(p));
+const r=(fb,p)=>fb.ref(rootPath(p));
 const key=v=>String(v??'').trim().replace(/[.#$\/\[\]]/g,'_')||'_';
 const pad=n=>String(n).padStart(2,'0');
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -80,41 +52,12 @@ const valuesFrom=v=>v&&typeof v==='object'?(Array.isArray(v)?v:Object.values(v))
 
 async function profile(){
   const fb=await fbReady;
-  const u=fb.auth.currentUser;
+  const u=await fb.authReady;
   if(!u) throw new Error('Belum login Firebase.');
-
-  // Struktur pengguna aplikasi Piket yang benar:
-  // schools/SMKWD/apps/piket/users/{id}
-  // Tidak lagi mencari schools/SMKWD/security/users/{UID}.
-  const snap=await fb.getValue(r(fb,'apps/piket/users'));
-  const users=snap.val()||{};
-  const rows=Object.entries(users).map(([id,v])=>Object.assign({_id:id},v||{}));
-
-  const candidates=rows.filter(x=>{
-    const uid=String(x.UID||x.uid||x.FirebaseUID||'').trim();
-    return uid && uid===u.uid;
-  });
-  const byEmail=rows.filter(x=>String(x.Email||x.email||'').toLowerCase()===String(u.email||'').toLowerCase());
-
-  // Record yang ditemukan saat audit menggunakan Username/UserID,
-  // bukan UID Firebase. Karena itu username disimpan di session setelah
-  // Authentication berhasil dan dicocokkan dengan akun aplikasi Piket.
-  let p=candidates[0]||byEmail[0];
-  if(!p){
-    const emailLocal=String(u.email||'').split('@')[0].toLowerCase();
-    p=rows.find(x=>String(x.Username||'').toLowerCase()===emailLocal);
-  }
-  if(!p) throw new Error('Login Firebase berhasil, tetapi akun belum ditemukan di schools/SMKWD/apps/piket/users.');
-
-  const active=String(p.Aktif??p.active??'').toLowerCase();
-  if(active && !['ya','true','1','aktif'].includes(active)) throw new Error('Akun Piket ditemukan tetapi tidak aktif.');
-
+  const s=await fb.getValue(r(fb,'security/users/'+key(u.uid)));
+  const p=s.val();
+  if(!p || p.active!==true) throw new Error('Profil Firebase belum dibuat atau akun tidak aktif.');
   p.uid=u.uid;
-  p.firebaseEmail=u.email||'';
-  p.identifier=p.Username||p.identifier||'';
-  p.nama=p.NamaPetugas||p.nama||p.Nama||p.Username||'';
-  p.role=String(p.Role||p.role||'').toLowerCase();
-  p.active=true;
   return p;
 }
 
@@ -167,45 +110,21 @@ async function login(username,password){
   const u=String(username||'').trim();
   const p=String(password||'');
   if(!u||!p)return {ok:false,message:'Username dan password wajib diisi.'};
-
-  // Pastikan username memang terdaftar pada aplikasi Piket sebelum Auth.
-  const userSnap=await fb.getValue(r(fb,'apps/piket/users'));
-  const userRows=Object.values(userSnap.val()||{});
-  const appUser=userRows.find(x=>String(x.Username||'').trim().toLowerCase()===u.toLowerCase());
-  if(!appUser) return {ok:false,message:'Username tidak ditemukan pada Data Pengguna Piket.'};
-  const active=String(appUser.Aktif??'').toLowerCase();
-  if(active && !['ya','true','1','aktif'].includes(active)) return {ok:false,message:'Akun pengguna Piket tidak aktif.'};
-
-  // Password tetap diverifikasi oleh Firebase Authentication.
-  // Password TIDAK disimpan di Realtime Database.
-  const normalized=u.toLowerCase().replace(/\s+/g,'_');
   const emailCandidates=u.includes('@')?[u]:[
-    normalized+'@smkwd.local',
-    normalized+'@piket.smkwd.local',
-    normalized+'@admin.smkwd.local',
-    normalized+'@guru.smkwd.local',
-    normalized+'@petugas.smkwd.local'
+    u.toLowerCase().replace(/\s+/g,'_')+'@piket.smkwd.local',
+    u.toLowerCase().replace(/\s+/g,'_')+'@petugas.smkwd.local',
+    u.toLowerCase().replace(/\s+/g,'_')+'@guru.smkwd.local',
+    u.toLowerCase().replace(/\s+/g,'_')+'@admin.smkwd.local'
   ];
-
   let last=null;
   for(const email of [...new Set(emailCandidates)]){
     try{
       const c=await fb.signInWithEmailAndPassword(fb.auth,email,p);
       const pr=await profile();
-      const role=String(pr.Role||pr.role||'').toLowerCase();
-      if(!['admin','guru','petugas'].includes(role)){
-        try{await fb.signOut(fb.auth);}catch(_){}
-        return {ok:false,message:'Role akun Piket tidak dikenali: '+(pr.Role||pr.role||'-')};
-      }
-      return {ok:true,token:c.user.uid,user:{Username:pr.Username||pr.identifier||normalized,NamaPetugas:pr.NamaPetugas||pr.nama||normalized,Role:role,Aktif:true,uid:c.user.uid}};
+      return {ok:true,token:c.user.uid,user:{Username:pr.identifier||u,NamaPetugas:pr.nama||u,Role:pr.role||'',Aktif:pr.active===true,uid:c.user.uid}};
     }catch(e){last=e;try{await fb.signOut(fb.auth);}catch(_){} }
   }
-
-  const code=last?.code||'';
-  if(code==='auth/invalid-credential') return {ok:false,message:'Password atau akun Firebase tidak cocok untuk username '+u+'.'};
-  if(code==='auth/invalid-api-key') return {ok:false,message:'Konfigurasi Firebase API key tidak valid.'};
-  if(code==='auth/network-request-failed') return {ok:false,message:'Koneksi ke Firebase gagal. Periksa internet.'};
-  return {ok:false,message:last?.message||'Login Firebase gagal.'};
+  return {ok:false,message:last?.code==='auth/invalid-credential'?'Username atau password salah.':(last?.message||'Login gagal.')};
 }
 
 async function logout(){
