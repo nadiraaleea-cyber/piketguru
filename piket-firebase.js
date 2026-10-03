@@ -52,7 +52,7 @@ const valuesFrom=v=>v&&typeof v==='object'?(Array.isArray(v)?v:Object.values(v))
 
 async function profile(){
   const fb=await fbReady;
-  const u=await fb.authReady;
+   const u=fb.auth.currentUser;
   if(!u) throw new Error('Belum login Firebase.');
   const s=await fb.getValue(r(fb,'security/users/'+key(u.uid)));
   const p=s.val();
